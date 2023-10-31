@@ -2,13 +2,53 @@
 
 use itertools::Itertools;
 use proc_macro::TokenStream;
-use syn::parse_macro_input;
+use syn::{parse::Parse, parse_macro_input, Token};
 
 fn slice_to_array_token(input: &[u8]) -> TokenStream {
     format!("[{}]", input.iter().join(", "))
         .parse::<proc_macro2::TokenStream>()
         .expect("Failed to parse array")
         .into()
+}
+
+fn slice_to_auto_sized_link_section_array(
+    link_section_name: String,
+    arr_name: String,
+    input: &[u8],
+) -> TokenStream {
+    format!(
+        "#[allow(unused, dead_code)]\n
+        #[no_mangle]\n
+        #[link_section = \"{}\"]\n
+        static {}: [u8; {}] = [{}];",
+        link_section_name,
+        arr_name,
+        input.len(),
+        input.iter().join(", ")
+    )
+    .parse::<proc_macro2::TokenStream>()
+    .expect("Failed to parse array")
+    .into()
+}
+
+struct NameAndEnvInput {
+    link_section_name: syn::LitStr,
+    _comma0: Token![,],
+    arr_name: syn::LitStr,
+    _comma1: Token![,],
+    env_var: syn::LitStr,
+}
+
+impl Parse for NameAndEnvInput {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        Ok(Self {
+            link_section_name: input.parse()?,
+            _comma0: input.parse()?,
+            arr_name: input.parse()?,
+            _comma1: input.parse()?,
+            env_var: input.parse()?,
+        })
+    }
 }
 
 #[cfg(feature = "bs58")]
@@ -102,6 +142,31 @@ pub fn hex_env_to_array(input: TokenStream) -> TokenStream {
         )
         .expect("Can't decode hex")
         .as_slice(),
+    )
+}
+
+#[cfg(feature = "hex")]
+/// Get from env variable string, decode it from hex and write array and sized array type as result
+/// ```rs
+/// env_to_array::patch_linker_section_from_hex_env!(".mp_fingerprint", "TEST_FINGER", "MP_FINGERPRINT_TOML_HEX");
+/// ```
+///
+/// expand to ...
+/// ```rs
+/// #[allow(unused, dead_code)]
+/// #[no_mangle]
+/// #[link_section = ".mp_fingerprint"]
+/// static TEST_FINGER: [u8; 14] = *b"SOME TOML HERE";
+/// ```
+#[proc_macro]
+pub fn patch_linker_section_from_hex_env(inputs: TokenStream) -> TokenStream {
+    let inputs = parse_macro_input!(inputs as NameAndEnvInput);
+    slice_to_auto_sized_link_section_array(
+        inputs.link_section_name.value(),
+        inputs.arr_name.value(),
+        hex::decode(std::env::var(inputs.env_var.value()).expect("This env not found"))
+            .expect("Can't decode hex")
+            .as_slice(),
     )
 }
 
