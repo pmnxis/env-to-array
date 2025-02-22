@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+use base64::prelude::*;
 use itertools::Itertools;
 use proc_macro::TokenStream;
 use syn::{parse::Parse, parse_macro_input, Token};
@@ -8,6 +9,13 @@ fn slice_to_array_token(input: &[u8]) -> TokenStream {
     format!("[{}]", input.iter().join(", "))
         .parse::<proc_macro2::TokenStream>()
         .expect("Failed to parse array")
+        .into()
+}
+
+fn slice_to_usize_token(input: u64) -> TokenStream {
+    format!("0x{:x}", input)
+        .parse::<proc_macro2::TokenStream>()
+        .expect("Failed to parse hex usize")
         .into()
 }
 
@@ -74,7 +82,8 @@ pub fn bs58_to_array(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn bs64_to_array(input: TokenStream) -> TokenStream {
     slice_to_array_token(
-        base64::decode(parse_macro_input!(input as syn::LitStr).value())
+        BASE64_STANDARD
+            .decode(parse_macro_input!(input as syn::LitStr).value())
             .expect("Can't decode bs64")
             .as_slice(),
     )
@@ -119,12 +128,13 @@ pub fn bs58_env_to_array(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn bs64_env_to_array(input: TokenStream) -> TokenStream {
     slice_to_array_token(
-        base64::decode(
-            std::env::var(parse_macro_input!(input as syn::LitStr).value())
-                .expect("This env not found"),
-        )
-        .expect("Can't decode bs64")
-        .as_slice(),
+        BASE64_STANDARD
+            .decode(
+                std::env::var(parse_macro_input!(input as syn::LitStr).value())
+                    .expect("This env not found"),
+            )
+            .expect("Can't decode bs64")
+            .as_slice(),
     )
 }
 
@@ -142,6 +152,21 @@ pub fn hex_env_to_array(input: TokenStream) -> TokenStream {
         )
         .expect("Can't decode hex")
         .as_slice(),
+    )
+}
+
+#[cfg(feature = "hex")]
+/// Get from env variable string, decode it from hex and write array as result
+/// ```
+/// const BOOTLOADER_OFFSET: usize = env_to_array::hex_env_to_usize!("_ENV_TO_ARRAY_HEX");
+/// ```
+#[proc_macro]
+pub fn hex_env_to_usize(input: TokenStream) -> TokenStream {
+    slice_to_usize_token(
+        std::env::var(parse_macro_input!(input as syn::LitStr).value())
+            .expect("This env not found")
+            .parse::<u64>()
+            .expect("Can't decode hex"),
     )
 }
 
